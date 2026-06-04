@@ -113,8 +113,12 @@ pushed=9, skipped=3 (same counts — no new records, but alpha-001's status chan
 ### e) Verify candidate.updated event with changed_fields
 
 ```bash
-docker compose exec event_logger sqlite3 /data/event_logger.db \
-  "SELECT event_type, payload_json FROM processed_events WHERE event_type='candidate.updated'"
+docker compose exec event_logger python -c "
+import sqlite3
+conn = sqlite3.connect('/data/event_logger.db')
+for row in conn.execute('SELECT event_type, payload_json FROM processed_events WHERE event_type = ?', ('candidate.updated',)):
+    print(row)
+"
 ```
 
 The `payload_json` field should contain `"changed_fields": ["internal_status"]`.
@@ -155,9 +159,9 @@ for row in conn.execute('SELECT event_type, count(*) FROM processed_events GROUP
     print(row)
 "
 
-# Check Alpha ATS directly
-curl -s "http://localhost:8001/api/applications?since=2020-01-01T00:00:00Z" | python -m json.tool
+# Check Alpha ATS directly (7 days back from 2026-06-04)
+curl -s "http://localhost:8001/api/applications?since=2026-05-28T00:00:00Z" | python -m json.tool
 
-# Check Beta ATS directly (unix ts for 2020-01-01)
-curl -s "http://localhost:8002/v2/candidates?updated_after=1577836800" | python -m json.tool
+# Check Beta ATS directly (unix ts for 2026-05-28, ~7 days back)
+curl -s "http://localhost:8002/v2/candidates?updated_after=1779926400" | python -m json.tool
 ```

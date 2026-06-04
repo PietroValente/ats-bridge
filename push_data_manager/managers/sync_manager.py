@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from adapters import REGISTRY
 from adapters.protocol import NormalizedApplication
@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = {"new", "in_review", "rejected", "hired"}
 
-# Use a distant past date on the first sync so all historical fixture data is pulled.
-# "7 days ago" would leave static fixtures outside the window if evaluated weeks later.
-_INITIAL_SINCE = datetime(2020, 1, 1, tzinfo=timezone.utc)
+# Spec default: on the first sync (no watermark yet) look back 7 days.
+# Fixtures are dated within this window (last 24h) so the initial sync pulls them all.
+_INITIAL_LOOKBACK = timedelta(days=7)
 
 
 def _validate(n: NormalizedApplication) -> str | None:
@@ -33,7 +33,7 @@ class SyncManager:
             raise ValueError(f"Unknown ATS source: {ats_source!r}")
 
         state, _ = SyncState.objects.get_or_create(ats_source=ats_source)
-        since = state.last_sync_at or _INITIAL_SINCE
+        since = state.last_sync_at or (datetime.now(timezone.utc) - _INITIAL_LOOKBACK)
 
         raw_list = adapter.fetch_applications(since)
 

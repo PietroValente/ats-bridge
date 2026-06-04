@@ -9,7 +9,7 @@
     "age": 32,
     "position_code": "POS-77",
     "stage": "new_application",
-    "submitted_timestamp": 1768471200
+    "submitted_timestamp": 1780473600
   },
   {
     "candidate_uuid": "beta-002",
@@ -21,7 +21,7 @@
     "age": 29,
     "position_code": "POS-77",
     "stage": "screening",
-    "submitted_timestamp": 1768694400
+    "submitted_timestamp": 1780479000
   },
   {
     "candidate_uuid": "beta-003",
@@ -33,7 +33,7 @@
     "age": 35,
     "position_code": "POS-88",
     "stage": "new_application",
-    "submitted_timestamp": 1769040000
+    "submitted_timestamp": 1780484400
   },
   {
     "candidate_uuid": "beta-004",
@@ -45,7 +45,7 @@
     "age": 41,
     "position_code": "POS-99",
     "stage": "not_a_fit",
-    "submitted_timestamp": 1769558400
+    "submitted_timestamp": 1780491600
   },
   {
     "candidate_uuid": "beta-005",
@@ -57,7 +57,7 @@
     "age": 26,
     "position_code": "POS-77",
     "stage": "offer_accepted",
-    "submitted_timestamp": 1770076800
+    "submitted_timestamp": 1780497000
   },
   {
     "candidate_uuid": "beta-006",
@@ -69,7 +69,7 @@
     "age": 38,
     "position_code": "POS-88",
     "stage": "screening",
-    "submitted_timestamp": 1770508800
+    "submitted_timestamp": 1780502400
   },
   {
     "candidate_uuid": "beta-007",
@@ -81,7 +81,7 @@
     "age": 31,
     "position_code": "POS-99",
     "stage": "new_application",
-    "submitted_timestamp": 1771027200
+    "submitted_timestamp": 1780509600
   },
   {
     "candidate_uuid": "beta-008",
@@ -93,7 +93,7 @@
     "age": 44,
     "position_code": "POS-77",
     "stage": "not_a_fit",
-    "submitted_timestamp": 1771545600
+    "submitted_timestamp": 1780516800
   },
   {
     "candidate_uuid": "beta-nullmobile",
@@ -105,7 +105,7 @@
     "age": 33,
     "position_code": "POS-88",
     "stage": "new_application",
-    "submitted_timestamp": 1771977600
+    "submitted_timestamp": 1780524000
   },
   {
     "candidate_uuid": "beta-minor",
@@ -117,7 +117,7 @@
     "age": 16,
     "position_code": "POS-77",
     "stage": "new_application",
-    "submitted_timestamp": 1772323200
+    "submitted_timestamp": 1780531200
   },
   {
     "candidate_uuid": "beta-noemail",
@@ -129,7 +129,7 @@
     "age": 27,
     "position_code": "POS-99",
     "stage": "screening",
-    "submitted_timestamp": 1773100800
+    "submitted_timestamp": 1780534800
   },
   {
     "candidate_uuid": "beta-badstage",
@@ -141,6 +141,6 @@
     "age": 29,
     "position_code": "POS-88",
     "stage": "unknown_stage",
-    "submitted_timestamp": 1773532800
+    "submitted_timestamp": 1780538400
   }
 ]

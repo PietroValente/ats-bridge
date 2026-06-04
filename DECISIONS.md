@@ -18,13 +18,19 @@ Structural validation (email present, age ≥ 18) lives in the manager because t
 
 talent_pool is pure Python, no Django. Adding an ORM (SQLAlchemy, or Django configured for a second service) would be significant overhead for a service that needs one table and three operations. The `repository.py` module is 60 lines and the upsert logic is directly readable.
 
-### 4. Initial `since` sentinel = 2020-01-01
+### 4. First-run window = 7 days (spec default), fixtures dated in the last 24h
 
-The spec says "7 days ago on first run". With static fixture data, 7 days would make the system unusable the week after development — the evaluator would get 0 candidates on their first sync. Using 2020-01-01 as the sentinel makes the system reliably pull all fixtures on first run regardless of when it's evaluated, which is what the demo actually needs.
+The spec default is "7 days ago on first run", and the manager honours it literally: with no stored watermark, `since = now() - 7 days`. For that window to actually pull data, the fixtures have to live inside it, so every Alpha `applied_at` and Beta `submitted_timestamp` is dated within the last day (yesterday → today). The alternative — a far-past sentinel like 2020-01-01 — also pulls everything, but it sidesteps the spec instead of satisfying it. Keeping the real 7-day window means the demo exercises the exact code path a production incremental sync would.
 
 ### 5. Fixtures mounted as volumes, not baked into the image
 
 `fake_ats_alpha/fixtures/` and `fake_ats_beta/fixtures/` are mounted into their containers via docker-compose volumes. This means the `candidate.updated` demo scenario (edit a fixture → re-sync → verify changed_fields) can be demonstrated by editing files on the host and restarting the container, without rebuilding the image.
+
+---
+
+## Event bus
+
+Redis pub/sub. The in-process queue was a non-starter: the consumer would run inside talent_pool's process, so there'd be no real boundary to test — and a cross-service decoupling I can't demonstrate isn't worth claiming. A file-based queue works but I'd have to hand-roll polling, file locking, and offset tracking, which is more code and more failure modes than the thing it replaces. Redis pub/sub gives a genuine network boundary between publisher and consumer — the actual topology of production — for one container and near-zero setup. The `EventBus` Protocol keeps the choice cheap: swapping Redis for anything else is a one-file adapter change, not a rewrite.
 
 ---
 
@@ -54,9 +60,9 @@ AI proposed a module-level channel object to avoid creating a new channel on eve
 
 ## Trade-offs
 
-### Static vs dynamic fixture timestamps
+### Fixture timestamps coupled to wall-clock
 
-Using fixed dates in 2026-01 through 2026-03 means the ATS filtering by `applied_at` / `submitted_timestamp` will work correctly as long as the initial `since` sentinel is far enough in the past (2020-01-01). The trade-off: if someone evaluates the system years from now with a 7-day window, the behaviour changes. I chose correctness over literal spec compliance on the "7 days" default.
+The fixtures carry recent dates (last 24h) so the literal 7-day first-run window pulls them. The cost is a wall-clock coupling: after the first sync the watermark becomes `now()`, so the second-sync no-op only holds if the demo is run *after* the latest fixture timestamp. I keep that latest timestamp early in the day (02:00 UTC) so any normal evaluation time is safely past it. A fully time-independent alternative (a far-past sentinel, or timestamps recomputed at load time) exists; I traded a small, bounded wall-clock assumption for spec-faithful behaviour with deterministic fixed data.
 
 ### Django runserver vs gunicorn
 

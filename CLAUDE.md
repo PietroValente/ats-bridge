@@ -78,7 +78,7 @@ curl → push_data_manager (Django :8000)
 
 **Event emission rule** (in `talent_pool/servicer.py`): `created=True` → `candidate.created`; `created=False` + non-empty `changed_fields` → `candidate.updated`; no-op → no event.
 
-**Initial sync sentinel** = `datetime(2020, 1, 1, tzinfo=timezone.utc)`, not 7 days ago — ensures all static fixtures are pulled on first run regardless of evaluation date.
+**First-run window** = `now() - 7 days` (the spec default, in `sync_manager.py::_INITIAL_LOOKBACK`). Fixtures are dated within the last 24h so the initial sync pulls them all. Trade-off: the second-sync no-op assumes the demo runs after the latest fixture timestamp, kept at 02:00 UTC — see `DECISIONS.md`.
 
 ## Known issues / trade-offs
 
