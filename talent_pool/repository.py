@@ -12,8 +12,6 @@ _TRACKED_FIELDS = [
     "applied_at",
 ]
 
-_ALL_FIELDS = ["external_id", "ats_source"] + _TRACKED_FIELDS
-
 
 def init_db(db_path: str) -> None:
     with sqlite3.connect(db_path) as conn:

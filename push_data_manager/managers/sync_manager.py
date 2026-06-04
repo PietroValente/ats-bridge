@@ -1,9 +1,12 @@
+import logging
 from datetime import datetime, timezone
 
 from adapters import REGISTRY
 from adapters.protocol import NormalizedApplication
 from db_models.models import SyncState
 import utils.grpc_client as grpc_client
+
+logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = {"new", "in_review", "rejected", "hired"}
 
@@ -50,8 +53,17 @@ class SyncManager:
                 skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
                 continue
 
-            grpc_client.upsert_candidate(normalized)
-            pushed += 1
+            try:
+                grpc_client.upsert_candidate(normalized)
+                pushed += 1
+            except Exception as exc:
+                logger.error(
+                    "gRPC UpsertCandidate failed for %s/%s: %s",
+                    normalized.ats_source,
+                    normalized.external_id,
+                    exc,
+                )
+                skipped_reasons["grpc_error"] = skipped_reasons.get("grpc_error", 0) + 1
 
         skipped = sum(skipped_reasons.values())
         state.last_sync_at = datetime.now(timezone.utc)

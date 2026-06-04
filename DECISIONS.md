@@ -73,3 +73,33 @@ I wrote the initial migration by hand (`0001_initial.py`) rather than generating
 ### 2. Use `grpc.aio` for an async gRPC server in talent_pool
 
 The current talent_pool uses a `ThreadPoolExecutor` which is fine for low concurrency but holds a thread per in-flight request. For a service that sits under a real sync load, `grpc.aio` + asyncio would be cleaner. I kept the synchronous version because it's simpler to reason about and the spec load doesn't justify it.
+
+---
+
+## Known limitations left as conscious trade-offs
+
+These are real weaknesses I am aware of and chose not to fix, because none is reachable in the scope of this assessment (manual curl trigger, static fixtures, single-threaded sync). I document them here rather than hide them.
+
+### 1. Sync watermark is `datetime.now()`, not `max(applied_at)`
+
+**What happens.** After a sync, `SyncState.last_sync_at` is set to `datetime.now(timezone.utc)`. The next sync pulls records with `applied_at > last_sync_at`. Any candidate created in the source ATS *during* the sync (between the fetch and the `now()` assignment) has an `applied_at` earlier than the recorded watermark, so it is never pulled again. This is the classic high-water-mark gap.
+
+**Why left.** The sync runs manually against static fixtures with no concurrent ingestion, so the gap window is always empty. Tracking the maximum `applied_at` actually seen is also complicated by the two timestamp formats (Alpha ISO 8601 vs Beta unix), which would need parsing back into a common type just to compute the watermark.
+
+**In production.** Page on an immutable, monotonic cursor supplied by the ATS (e.g. an `updated_at` or sequence id) rather than a wall clock. If only a timestamp is available, set the next watermark to the max `applied_at` observed in the batch and re-pull a small overlap window each run — the `(ats_source, external_id)` upsert idempotency absorbs the duplicates, so overlap is safe and a gap is not.
+
+### 2. Alpha `age` is derived from `today()` and can emit a spurious `candidate.updated`
+
+**What happens.** Alpha exposes only `birth_date`, so `AlphaAdapter` computes `age` relative to `date.today()` and that computed value is persisted in talent_pool. When a sync runs after a candidate's birthday, the recomputed age differs from the stored one, so `upsert_candidate` reports `changed_fields=["age"]` and emits a `candidate.updated` even though nothing changed in the source ATS. Beta is immune because its `age` comes straight from the source.
+
+**Why left.** The internal schema and proto model `age` as a persisted `int32` (a fixed decision for this assessment), and Alpha has no age field, so the adapter must derive it. The drift only triggers across a birthday boundary between two separate syncs — it cannot surface in a same-session demo.
+
+**In production.** Persist the stable source value (`birth_date`) and treat `age` as a derived/presentation value computed at read time, so it never participates in change detection. If `age` must stay in the stored schema, exclude derived fields from the `changed_fields` comparison.
+
+### 3. Beta `age=None → 0 → minor_candidate` (missing data classified as minor)
+
+**What happens.** `BetaAdapter.normalize` does `age = raw.get("age") or 0`. A missing or null age collapses to `0`, and the manager's `_validate` then skips the record with reason `minor_candidate`. So a *missing-data* record is mislabeled as an underage candidate. This is inconsistent with Alpha, where a missing/invalid `birth_date` raises and is bucketed as `normalization_error`.
+
+**Why left.** Not reachable with the current Beta fixtures (every record has a valid age). More importantly, `_validate` runs *outside* the `normalize` try/except, so the naive fix (`raw["age"]`) would let `None` reach `None < 18` → `TypeError` → crash the entire sync. The `or 0` fallback is exactly what keeps a missing age from crashing the run; the price is a misleading skip reason for a case that cannot occur with the given data.
+
+**In production.** Validate field presence explicitly and separately from the value check: distinguish "age missing" (a dedicated reason such as `missing_age` / `incomplete_data`) from "age present and < 18" (`minor_candidate`). Either make the adapter raise on missing age — consistent with Alpha, bucketed as `normalization_error` — or add a presence guard in `_validate` before the numeric comparison.
