@@ -30,9 +30,13 @@ curl -s -X POST http://localhost:8000/api/v1/sync/beta | python -m json.tool
 # Second sync Alpha — must be a no-op: pulled = 0, pushed = 0
 curl -s -X POST http://localhost:8000/api/v1/sync/alpha | python -m json.tool
 
-# Check events logged by event_logger
-docker compose exec event_logger sqlite3 /data/event_logger.db \
-  "SELECT event_type, count(*) FROM processed_events GROUP BY event_type"
+# Check events logged by event_logger (slim image has no sqlite3 CLI, use Python)
+docker compose exec event_logger python -c "
+import sqlite3
+conn = sqlite3.connect('/data/event_logger.db')
+for row in conn.execute('SELECT event_type, count(*) FROM processed_events GROUP BY event_type'):
+    print(row)
+"
 ```
 
 See [`curl_examples.md`](curl_examples.md) for the full end-to-end demo including the `candidate.updated` flow.

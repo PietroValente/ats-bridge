@@ -21,17 +21,17 @@ message NormalizedCandidate {
 }
 
 message UpsertResult {
-  int64  candidate_pk   = 1;
+  string candidate_pk   = 1;
   bool   created        = 2;
   repeated string changed_fields = 3;
 }
 
 message GetCandidateRequest {
-  int64 candidate_pk = 1;
+  string candidate_pk = 1;
 }
 
 message Candidate {
-  int64  candidate_pk   = 1;
+  string candidate_pk   = 1;
   string external_id    = 2;
   string ats_source     = 3;
   string first_name     = 4;

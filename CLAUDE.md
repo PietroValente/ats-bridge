@@ -39,10 +39,16 @@ curl -s -X POST http://localhost:8000/api/v1/sync/alpha | python -m json.tool
 # Expected: pulled=12, pushed=9, skipped=3 on first run after volume reset
 ```
 
-**Inspect event_logger DB:**
+**Full demo (including candidate.updated flow):** see `curl_examples.md`.
+
+**Inspect event_logger DB** (slim image has no sqlite3 CLI, use Python):
 ```bash
-docker compose exec event_logger sqlite3 /data/event_logger.db \
-  "SELECT event_type, count(*) FROM processed_events GROUP BY event_type"
+docker compose exec event_logger python -c "
+import sqlite3
+conn = sqlite3.connect('/data/event_logger.db')
+for row in conn.execute('SELECT event_type, count(*) FROM processed_events GROUP BY event_type'):
+    print(row)
+"
 ```
 
 ## Architecture

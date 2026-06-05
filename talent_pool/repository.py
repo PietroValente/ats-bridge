@@ -1,4 +1,5 @@
 import sqlite3
+import uuid
 from typing import Optional
 
 _TRACKED_FIELDS = [
@@ -17,7 +18,7 @@ def init_db(db_path: str) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS candidates (
-                pk              INTEGER PRIMARY KEY AUTOINCREMENT,
+                pk              TEXT    PRIMARY KEY,
                 external_id     TEXT    NOT NULL,
                 ats_source      TEXT    NOT NULL,
                 first_name      TEXT,
@@ -33,7 +34,7 @@ def init_db(db_path: str) -> None:
         """)
 
 
-def upsert_candidate(db_path: str, c: dict) -> tuple[int, bool, list[str]]:
+def upsert_candidate(db_path: str, c: dict) -> tuple[str, bool, list[str]]:
     """
     Insert or update a candidate keyed on (ats_source, external_id).
     Returns (pk, created, changed_fields).
@@ -47,12 +48,14 @@ def upsert_candidate(db_path: str, c: dict) -> tuple[int, bool, list[str]]:
         ).fetchone()
 
         if existing is None:
-            cur = conn.execute(
+            pk = str(uuid.uuid4())
+            conn.execute(
                 "INSERT INTO candidates "
-                "(external_id, ats_source, first_name, last_name, email, phone, "
+                "(pk, external_id, ats_source, first_name, last_name, email, phone, "
                 "age, job_external_id, internal_status, applied_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
+                    pk,
                     c["external_id"],
                     c["ats_source"],
                     c["first_name"],
@@ -65,7 +68,7 @@ def upsert_candidate(db_path: str, c: dict) -> tuple[int, bool, list[str]]:
                     c["applied_at"],
                 ),
             )
-            return cur.lastrowid, True, []
+            return pk, True, []
 
         # str() normalises None vs "" vs int so comparisons are consistent
         changed = [
@@ -81,7 +84,7 @@ def upsert_candidate(db_path: str, c: dict) -> tuple[int, bool, list[str]]:
         return existing["pk"], False, changed
 
 
-def get_candidate(db_path: str, pk: int) -> Optional[sqlite3.Row]:
+def get_candidate(db_path: str, pk: str) -> Optional[sqlite3.Row]:
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         return conn.execute(

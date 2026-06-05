@@ -78,7 +78,7 @@ class TalentPoolServicer(klaaryo_pb2_grpc.TalentPoolServicer):
     def _emit(
         self,
         event_type: str,
-        pk: int,
+        pk: str,
         request,
         changed_fields: list[str],
     ) -> None:

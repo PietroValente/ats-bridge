@@ -18,7 +18,7 @@ def init_db() -> None:
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id     TEXT    NOT NULL UNIQUE,
                 event_type   TEXT    NOT NULL,
-                candidate_pk INTEGER,
+                candidate_pk TEXT,
                 ats_source   TEXT,
                 received_at  TEXT    NOT NULL,
                 payload_json TEXT    NOT NULL

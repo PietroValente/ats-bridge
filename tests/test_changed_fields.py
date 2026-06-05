@@ -36,7 +36,7 @@ def test_insert_returns_created_true_and_empty_changed_fields():
         pk, created, changed = repository.upsert_candidate(db, _BASE)
         assert created is True
         assert changed == []
-        assert isinstance(pk, int) and pk > 0
+        assert isinstance(pk, str) and pk
     finally:
         os.unlink(db)
 

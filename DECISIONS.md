@@ -8,6 +8,8 @@ A dict mapping `ats_source → adapter instance` means the manager never knows w
 
 The alternative — branching in the manager — starts reasonable with two sources and becomes unmaintainable at five.
 
+A factory function is overkill here: it adds a construction layer without removing the branching — you still need an `if/elif` inside the factory to decide which adapter to build. The registry skips that entirely by holding instances directly.
+
 ### 2. Normalization raises, validation decides
 
 Each adapter's `normalize()` raises on data it cannot process: `date.fromisoformat("not-a-date")` raises `ValueError`, `STATUS_MAP["PENDING"]` raises `KeyError`. The manager catches both as `normalization_error`.
@@ -36,37 +38,29 @@ Redis pub/sub. The in-process queue was a non-starter: the consumer would run in
 
 ## Things the AI proposed that I rejected
 
-### 1. Abstract base class with `__init_subclass__` registry auto-registration
-
-AI suggested a metaclass approach where each adapter class automatically registers itself on definition. Rejected: it's a clever trick that adds indirection without solving a real problem. At two adapters, a plain dict in `__init__.py` is more readable. If we ever had 20 adapters it might make sense, but that's a hypothetical. The spec explicitly warns against this.
-
-### 2. Celery or async task queue for sync
-
-AI suggested wrapping sync in a Celery task so it runs in the background without blocking the HTTP response. Rejected: the trigger is a curl command and the sync completes in under a second on the local fixture data. Celery adds a worker process, a broker, and task state management for zero benefit in this scope.
-
-### 3. Outbox pattern for event publication
-
-AI proposed writing events to a database table (outbox) before publishing to Redis, to guarantee at-least-once delivery if Redis is down at publish time. Rejected for this scope: the spec explicitly says not to add this unless I think it through and document it. The simple path (publish immediately after upsert) is correct here. A Redis failure during publish loses the event — that's an acceptable trade-off given the demo context.
-
-### 4. Job model as a first-class entity
+### 1. Job model as a first-class entity
 
 AI initially modelled Job as a Django model with its own sync flow. Rejected immediately: the spec is explicit that `job_req_id` / `position_code` is just a string that travels with the candidate. There is no Job entity in this assessment.
 
-### 5. Connection pool for gRPC in push_data_manager
+### 2. Far-past sentinel instead of 7-day window
 
-AI proposed a module-level channel object to avoid creating a new channel on every sync call. Rejected: the sync is triggered manually with curl, so there are no concurrent calls. A new channel per call is 1–2ms of overhead on a LAN. Connection pooling is the right answer in production under load; it's premature optimisation here.
+The initial implementation used `datetime(2020, 1, 1)` as the first-run sentinel — the reasoning was that it guaranteed all fixtures would always be pulled regardless of their timestamps, making tests more stable. Rejected: the spec is explicit that the default window is 7 days. Hiding behind a far-past date satisfies the behaviour without satisfying the requirement. I kept the literal `timedelta(days=7)` and re-dated the fixtures to stay inside the window, so the code exercises the exact path a production incremental sync would.
+
+### 3. Autoincrement integer as candidate primary key
+
+AI generated `candidate_pk` as a SQLite `INTEGER PRIMARY KEY AUTOINCREMENT`. Rejected: the pk leaves the service — it travels in every `candidate.created` / `candidate.updated` event as the candidate's identity. An autoincrement counter resets to 1 whenever the database is wiped and rebuilt (which is exactly how the demo is reset, `down -v`), so after a reset `pk=1` points at a different candidate than before. Any downstream consumer that stored the pk as a reference would silently corrupt. I switched to a UUID generated at insert time: globally unique, reset-safe, no central counter to coordinate. The cost is a wider key (36-char string vs int); irrelevant at this scale.
 
 ---
 
 ## Trade-offs
 
-### Fixture timestamps coupled to wall-clock
+### Raw SQL in talent_pool vs ORM
 
-The fixtures carry recent dates (last 24h) so the literal 7-day first-run window pulls them. The cost is a wall-clock coupling: after the first sync the watermark becomes `now()`, so the second-sync no-op only holds if the demo is run *after* the latest fixture timestamp. I keep that latest timestamp early in the day (02:00 UTC) so any normal evaluation time is safely past it. A fully time-independent alternative (a far-past sentinel, or timestamps recomputed at load time) exists; I traded a small, bounded wall-clock assumption for spec-faithful behaviour with deterministic fixed data.
+`talent_pool` uses raw sqlite3 with no ORM. The trade-off: schema changes require manual SQL updates with no tooling to catch drift, and the upsert logic — SELECT, compare fields, conditional UPDATE — is more verbose than an ORM equivalent would be. The other side: `talent_pool` is pure Python with one table and three operations. An ORM (SQLAlchemy) would add a significant dependency and a layer of indirection for no reduction in actual complexity — the change-detection logic still has to be written by hand regardless, because no ORM computes `changed_fields` for you. The verbosity is contained in one 100-line file; the trade-off is worth it.
 
-### Django runserver vs gunicorn
+### Redis pub/sub vs Kafka
 
-Using `python manage.py runserver` avoids adding gunicorn to requirements and keeps the Dockerfile simpler. The trade-off: runserver is single-threaded and not safe for concurrent requests. For a manually-triggered curl demo this is irrelevant. The spec says no production-readiness, so this is the right call.
+Redis pub/sub is the right call for this scope: one container, zero configuration, and it gives a real network boundary between publisher and consumer. The trade-off is durability — pub/sub has no persistence, so any event published while `event_logger` is down is lost permanently. Kafka solves this with a persistent, replayable log, but it requires a broker cluster, Zookeeper (or KRaft), and significantly more setup overhead. For a manually-triggered demo with static fixtures and no concurrent load, that overhead buys nothing. In production, where events drive downstream AI workflows and losing a `candidate.created` means a candidate never gets contacted, Kafka or a similar durable bus would be the correct choice.
 
 ---
 
@@ -75,37 +69,3 @@ Using `python manage.py runserver` avoids adding gunicorn to requirements and ke
 ### 1. Run `makemigrations` as part of the Dockerfile
 
 I wrote the initial migration by hand (`0001_initial.py`) rather than generating it with Django. This works but is fragile — if the model changes, someone needs to remember to update the migration manually rather than running `manage.py makemigrations`. I would add a build-time `makemigrations` step in CI (not in the Dockerfile, where the DB path might not match) to catch drift.
-
-### 2. Use `grpc.aio` for an async gRPC server in talent_pool
-
-The current talent_pool uses a `ThreadPoolExecutor` which is fine for low concurrency but holds a thread per in-flight request. For a service that sits under a real sync load, `grpc.aio` + asyncio would be cleaner. I kept the synchronous version because it's simpler to reason about and the spec load doesn't justify it.
-
----
-
-## Known limitations left as conscious trade-offs
-
-These are real weaknesses I am aware of and chose not to fix, because none is reachable in the scope of this assessment (manual curl trigger, static fixtures, single-threaded sync). I document them here rather than hide them.
-
-### 1. Sync watermark is `datetime.now()`, not `max(applied_at)`
-
-**What happens.** After a sync, `SyncState.last_sync_at` is set to `datetime.now(timezone.utc)`. The next sync pulls records with `applied_at > last_sync_at`. Any candidate created in the source ATS *during* the sync (between the fetch and the `now()` assignment) has an `applied_at` earlier than the recorded watermark, so it is never pulled again. This is the classic high-water-mark gap.
-
-**Why left.** The sync runs manually against static fixtures with no concurrent ingestion, so the gap window is always empty. Tracking the maximum `applied_at` actually seen is also complicated by the two timestamp formats (Alpha ISO 8601 vs Beta unix), which would need parsing back into a common type just to compute the watermark.
-
-**In production.** Page on an immutable, monotonic cursor supplied by the ATS (e.g. an `updated_at` or sequence id) rather than a wall clock. If only a timestamp is available, set the next watermark to the max `applied_at` observed in the batch and re-pull a small overlap window each run — the `(ats_source, external_id)` upsert idempotency absorbs the duplicates, so overlap is safe and a gap is not.
-
-### 2. Alpha `age` is derived from `today()` and can emit a spurious `candidate.updated`
-
-**What happens.** Alpha exposes only `birth_date`, so `AlphaAdapter` computes `age` relative to `date.today()` and that computed value is persisted in talent_pool. When a sync runs after a candidate's birthday, the recomputed age differs from the stored one, so `upsert_candidate` reports `changed_fields=["age"]` and emits a `candidate.updated` even though nothing changed in the source ATS. Beta is immune because its `age` comes straight from the source.
-
-**Why left.** The internal schema and proto model `age` as a persisted `int32` (a fixed decision for this assessment), and Alpha has no age field, so the adapter must derive it. The drift only triggers across a birthday boundary between two separate syncs — it cannot surface in a same-session demo.
-
-**In production.** Persist the stable source value (`birth_date`) and treat `age` as a derived/presentation value computed at read time, so it never participates in change detection. If `age` must stay in the stored schema, exclude derived fields from the `changed_fields` comparison.
-
-### 3. Beta `age=None → 0 → minor_candidate` (missing data classified as minor)
-
-**What happens.** `BetaAdapter.normalize` does `age = raw.get("age") or 0`. A missing or null age collapses to `0`, and the manager's `_validate` then skips the record with reason `minor_candidate`. So a *missing-data* record is mislabeled as an underage candidate. This is inconsistent with Alpha, where a missing/invalid `birth_date` raises and is bucketed as `normalization_error`.
-
-**Why left.** Not reachable with the current Beta fixtures (every record has a valid age). More importantly, `_validate` runs *outside* the `normalize` try/except, so the naive fix (`raw["age"]`) would let `None` reach `None < 18` → `TypeError` → crash the entire sync. The `or 0` fallback is exactly what keeps a missing age from crashing the run; the price is a misleading skip reason for a case that cannot occur with the given data.
-
-**In production.** Validate field presence explicitly and separately from the value check: distinguish "age missing" (a dedicated reason such as `missing_age` / `incomplete_data`) from "age present and < 18" (`minor_candidate`). Either make the adapter raise on missing age — consistent with Alpha, bucketed as `normalization_error` — or add a presence guard in `_validate` before the numeric comparison.
